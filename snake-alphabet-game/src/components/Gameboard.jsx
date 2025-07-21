@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { WORDS } from '../utils/word';
 import './Gameboard.css';
-import Prompt from './Prompt';
 import CameraPanel from './CameraPanel';
 
 const GRID_SIZE = 20;
@@ -31,10 +30,23 @@ export default function Gameboard() {
   const [paused, setPaused] = useState(false);
   const intervalRef = useRef(null);
 
-  const placeLetters = (word, snakeHeadPos = { x: 10, y: 10 }) => {
+  const handleHeadDirection = (dir) => {
+    const newDir = {
+      up: { x: 0, y: -1 },
+      down: { x: 0, y: 1 },
+      left: { x: -1, y: 0 },
+      right: { x: 1, y: 0 }
+    }[dir];
+
+    if (newDir && (direction.x !== -newDir.x || direction.y !== -newDir.y)) {
+      setDirection(newDir);
+    }
+  };
+
+  const placeLetters = (word) => {
     const positions = [];
     for (let i = 0; i < word.length; i++) {
-      positions.push(getNextLetterPosition([snakeHeadPos], positions));
+      positions.push(getNextLetterPosition([snake[0]], positions));
     }
     return positions;
   };
@@ -59,20 +71,6 @@ export default function Gameboard() {
       setLetterPositions(placeLetters(wordData.word));
     }
   }, [wordData]);
-
-  useEffect(() => {
-    const handleKey = (e) => {
-      const dir = {
-        ArrowUp: { x: 0, y: -1 },
-        ArrowDown: { x: 0, y: 1 },
-        ArrowLeft: { x: -1, y: 0 },
-        ArrowRight: { x: 1, y: 0 },
-      };
-      if (dir[e.key]) setDirection(dir[e.key]);
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, []);
 
   useEffect(() => {
     if (gameOverReason || paused) return;
@@ -122,20 +120,12 @@ export default function Gameboard() {
     return () => clearInterval(intervalRef.current);
   }, [direction, letterIndex, letterPositions, gameOverReason, paused]);
 
-  if (gameOverReason === 'fail') {
+  if (gameOverReason) {
     return (
       <div className="game-over">
-        ❌ Wrong letter!<br />
-        <button onClick={() => resetGame(true)}>🔁 Try Again</button>
-      </div>
-    );
-  }
-
-  if (gameOverReason === 'success') {
-    return (
-      <div className="game-over">
-        🎉 Word Complete!<br />
-        <button onClick={() => resetGame(false)}>➡ Next Word</button>
+        {gameOverReason === 'fail' ? '❌ Wrong letter!' : '🎉 Word Complete!'}
+        <br />
+        <button onClick={() => resetGame(gameOverReason === 'fail')}>🔁 Play Again</button>
       </div>
     );
   }
@@ -143,27 +133,31 @@ export default function Gameboard() {
   return (
     <div className="game-wrapper">
       <div className="camera-top-right">
-        <CameraPanel onDirectionChange={(newDir) => {
-          if ((newDir.x !== -direction.x || newDir.y !== -direction.y)) {
-            setDirection(newDir);
-          }
-        }} />
+        <CameraPanel onDirectionChange={handleHeadDirection} />
+        <img
+          src={wordData.image}
+          alt="Word Hint"
+          className="word-image"
+        />
       </div>
 
       <div className="game-area">
-        <div className="prompt-above">
-          <Prompt word={wordData.word} progress={letterIndex} />
-          <button onClick={() => setPaused(p => !p)}>
-            {paused ? '▶ Resume' : '⏸ Pause'}
-          </button>
-          {paused && <div className="paused-message">⏸ Game Paused</div>}
-        </div>
+        <h1 className="top-left-title">Alphabet Snake 🐍</h1>
 
-        <img
-          src={wordData.image}
-          alt={wordData.word}
-          className="word-image"
-        />
+        <div className="word-progress">
+          {wordData.word.split('').map((char, i) => (
+            <span
+              key={i}
+              style={{
+                color: i < letterIndex ? 'lime' : 'white',
+                fontWeight: 'bold',
+                marginRight: '4px'
+              }}
+            >
+              {char}
+            </span>
+          ))}
+        </div>
 
         <div className="board">
           {[...Array(GRID_SIZE)].map((_, y) => (

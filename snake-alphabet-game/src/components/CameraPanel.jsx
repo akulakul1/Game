@@ -1,68 +1,69 @@
-// src/components/CameraPanel.jsx
-import { useEffect, useRef } from 'react';
-import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detection';
-import '@tensorflow/tfjs-backend-webgl';
+import React, { useEffect, useRef } from 'react';
+import { FaceMesh } from '@mediapipe/face_mesh';
+import { Camera } from '@mediapipe/camera_utils';
+import "./CameraPanel.css";
 
 export default function CameraPanel({ onDirectionChange }) {
-  const videoRef = useRef();
+  const videoRef = useRef(null);
+  const lastDirection = useRef(null);
+  const lastTime = useRef(Date.now());
 
   useEffect(() => {
-    async function setupCamera() {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
-    }
+    if (!videoRef.current) return;
 
-    async function runDetection() {
-      const model = await faceLandmarksDetection.load(
-        faceLandmarksDetection.SupportedPackages.mediapipeFacemesh
-      );
+    const faceMesh = new FaceMesh({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+    });
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6,
+    });
 
-      const detect = async () => {
-        if (videoRef.current.readyState === 4) {
-          const predictions = await model.estimateFaces({ input: videoRef.current });
-          if (predictions.length > 0) {
-            const keypoints = predictions[0].scaledMesh;
-            const nose = keypoints[1]; // nose tip
+    faceMesh.onResults((results) => {
+      if (!results.multiFaceLandmarks?.length) return;
+      const lm = results.multiFaceLandmarks[0];
+      const nose = lm[1];
+      const leftCheek = lm[234];
+      const rightCheek = lm[454];
+      const chin = lm[152];
+      const forehead = lm[10];
 
-            // Use nose x,y to determine direction
-            const [x, y] = nose;
+      const noseXRatio = (nose.x - leftCheek.x) / (rightCheek.x - leftCheek.x);
+      const noseYRatio = (nose.y - forehead.y) / (chin.y - forehead.y);
 
-            const centerX = videoRef.current.videoWidth / 2;
-            const centerY = videoRef.current.videoHeight / 2;
+      let newDir = null;
 
-            const dx = x - centerX;
-            const dy = y - centerY;
+      // Loosened thresholds for clearer head movement detection
+      if (noseXRatio < 0.35) newDir = 'left';
+      else if (noseXRatio > 0.65) newDir = 'right';
+      else if (noseYRatio < 0.35) newDir = 'up';
+      else if (noseYRatio > 0.65) newDir = 'down';
 
-            let direction = null;
-            if (Math.abs(dx) > Math.abs(dy)) {
-              direction = dx > 30 ? 'right' : dx < -30 ? 'left' : null;
-            } else {
-              direction = dy > 30 ? 'down' : dy < -30 ? 'up' : null;
-            }
+      const now = Date.now();
+      if (
+        newDir &&
+        newDir !== lastDirection.current &&
+        now - lastTime.current > 400
+      ) {
+        lastDirection.current = newDir;
+        lastTime.current = now;
+        onDirectionChange(newDir);
+      }
+    });
 
-            if (direction) {
-              // send direction to parent
-              if (onDirectionChange) {
-                const map = {
-                  up: { x: 0, y: -1 },
-                  down: { x: 0, y: 1 },
-                  left: { x: -1, y: 0 },
-                  right: { x: 1, y: 0 },
-                };
-                onDirectionChange(map[direction]);
-              }
-            }
-          }
-        }
-        requestAnimationFrame(detect);
-      };
+    const camera = new Camera(videoRef.current, {
+      onFrame: async () => {
+        await faceMesh.send({ image: videoRef.current });
+      },
+      width: 300,
+      height: 300,
+    });
+    camera.start();
 
-      detect();
-    }
-
-    setupCamera();
-    runDetection();
+    return () => camera.stop();
   }, [onDirectionChange]);
 
   return (
